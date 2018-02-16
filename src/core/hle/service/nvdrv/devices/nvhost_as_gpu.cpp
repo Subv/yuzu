@@ -69,7 +69,8 @@ u32 nvhost_as_gpu::MapBufferEx(const std::vector<u8>& input, std::vector<u8>& ou
               params.offset);
 
     if (!params.nvmap_handle) {
-        return 0;
+        LOG_ERROR(Service_NVDRV, "Invalid nvmap handle passed to MapBufferEx");
+        return -9;
     }
 
     auto object = nvmap_dev->GetObject(params.nvmap_handle);

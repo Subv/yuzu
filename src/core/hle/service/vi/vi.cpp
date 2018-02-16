@@ -288,8 +288,8 @@ protected:
         // TODO(Subv): Find out how this Fence is used.
         BufferProducerFence fence = {};
         fence.is_valid = 1;
-        fence.fences[0].id = 0;
-        fence.fences[0].value = 0;
+        for (auto& fence_ : fence.fences)
+            fence_.id = -1;
 
         Write(slot);
         Write<u32_le>(1);
@@ -325,7 +325,8 @@ protected:
     void SerializeData() override {
         // TODO(Subv): Figure out what this value means, writing non-zero here will make libnx try
         // to read an IGBPBuffer object from the parcel.
-        Write<u32_le>(0);
+        Write<u32_le>(1);
+        WriteObject(buffer);
         Write<u32_le>(0);
     }
 
