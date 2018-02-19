@@ -379,7 +379,13 @@ void IApplicationFunctions::PopLaunchParameter(Kernel::HLERequestContext& ctx) {
 void IApplicationFunctions::EnsureSaveData(Kernel::HLERequestContext& ctx) {
     LOG_WARNING(Service, "(STUBBED) called");
     IPC::ResponseBuilder rb{ctx, 4};
-    rb.Push(RESULT_SUCCESS);
+    static bool ensured = false;
+    if (!ensured) {
+        rb.Push(ResultCode(ErrorModule::FS, 40));
+        ensured = true;
+    } else {
+        rb.Push(RESULT_SUCCESS);
+    }
     rb.Push<u64>(0);
 }
 
