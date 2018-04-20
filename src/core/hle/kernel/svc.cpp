@@ -261,32 +261,95 @@ static ResultCode ArbitrateLock(Handle holding_thread_handle, VAddr mutex_addr,
               "requesting_current_thread_handle=0x%08X",
               holding_thread_handle, mutex_addr, requesting_thread_handle);
 
-    SharedPtr<Thread> holding_thread = g_handle_table.Get<Thread>(holding_thread_handle);
-    SharedPtr<Thread> requesting_thread = g_handle_table.Get<Thread>(requesting_thread_handle);
-
-    ASSERT(requesting_thread);
-    ASSERT(requesting_thread == GetCurrentThread());
-
-    SharedPtr<Mutex> mutex = g_object_address_table.Get<Mutex>(mutex_addr);
-    if (!mutex) {
-        // Create a new mutex for the specified address if one does not already exist
-        mutex = Mutex::Create(holding_thread, mutex_addr);
-        mutex->name = Common::StringFromFormat("mutex-%llx", mutex_addr);
+    // The mutex address must be 4-byte aligned
+    if ((mutex_addr % sizeof(u32)) != 0) {
+        return ResultCode(ErrorModule::Kernel, ErrCodes::MisalignedAddress);
     }
 
-    ASSERT(holding_thread == mutex->GetHoldingThread());
+    SharedPtr<Thread> requesting_thread = g_handle_table.Get<Thread>(requesting_thread_handle);
 
-    return WaitSynchronization1(mutex, requesting_thread.get());
+    // TODO(Subv): It is currently unknown if it is possible to lock a mutex in behalf of another
+    // thread.
+    ASSERT(requesting_thread == GetCurrentThread());
+
+    u32 addr_value = Memory::Read32(mutex_addr);
+
+    // If the mutex isn't being held, just return success.
+    if (addr_value != (holding_thread_handle | Thread::MutexHasWaitersFlag)) {
+        return RESULT_SUCCESS;
+    }
+
+    if (requesting_thread == nullptr)
+        return ERR_INVALID_HANDLE;
+
+    // Wait until the mutex is released
+    requesting_thread->wait_address = mutex_addr;
+    requesting_thread->wait_handle = requesting_thread_handle;
+
+    requesting_thread->status = THREADSTATUS_WAIT_MUTEX;
+    requesting_thread->wakeup_callback = nullptr;
+
+    return RESULT_SUCCESS;
+}
+
+/// Returns the number of threads that are waiting for a mutex, and the highest priority one among
+/// those.
+static std::pair<SharedPtr<Thread>, u32> GetHighestPriorityMutexWaitingThread(VAddr mutex_addr) {
+    auto& thread_list = Core::System::GetInstance().Scheduler().GetThreadList();
+
+    SharedPtr<Thread> highest_priority_thread;
+    u32 num_waiters = 0;
+
+    for (auto& thread : thread_list) {
+        if (thread->wait_address != mutex_addr)
+            continue;
+
+        ASSERT(thread->status == THREADSTATUS_WAIT_MUTEX);
+
+        ++num_waiters;
+        if (highest_priority_thread == nullptr ||
+            thread->GetPriority() < highest_priority_thread->GetPriority()) {
+            highest_priority_thread = thread;
+        }
+    }
+
+    return {highest_priority_thread, num_waiters};
 }
 
 /// Unlock a mutex
 static ResultCode ArbitrateUnlock(VAddr mutex_addr) {
     LOG_TRACE(Kernel_SVC, "called mutex_addr=0x%llx", mutex_addr);
 
-    SharedPtr<Mutex> mutex = g_object_address_table.Get<Mutex>(mutex_addr);
-    ASSERT(mutex);
+    // The mutex address must be 4-byte aligned
+    if ((mutex_addr % sizeof(u32)) != 0) {
+        return ResultCode(ErrorModule::Kernel, ErrCodes::MisalignedAddress);
+    }
 
-    return mutex->Release(GetCurrentThread());
+    auto [thread, num_waiters] = GetHighestPriorityMutexWaitingThread(mutex_addr);
+
+    // There are no more threads waiting for the mutex, release it completely.
+    if (thread == nullptr) {
+        Memory::Write32(mutex_addr, 0);
+        return RESULT_SUCCESS;
+    }
+
+    u32 mutex_value = thread->wait_handle;
+
+    if (num_waiters >= 2) {
+        // Notify the guest that there are still some threads waiting for the mutex
+        mutex_value |= Thread::MutexHasWaitersFlag;
+    }
+
+    // Grant the mutex to the next waiting thread and resume it.
+    Memory::Write32(mutex_addr, mutex_value);
+
+    ASSERT(thread->status == THREADSTATUS_WAIT_MUTEX);
+    thread->ResumeFromWait();
+
+    thread->wait_address = 0;
+    thread->wait_handle = 0;
+
+    return RESULT_SUCCESS;
 }
 
 /// Break program execution

@@ -151,6 +151,7 @@ void Thread::ResumeFromWait() {
     case THREADSTATUS_WAIT_HLE_EVENT:
     case THREADSTATUS_WAIT_SLEEP:
     case THREADSTATUS_WAIT_IPC:
+    case THREADSTATUS_WAIT_MUTEX:
         break;
 
     case THREADSTATUS_READY:
