@@ -548,8 +548,14 @@ private:
         default: {
             switch (instr.opcode.EffectiveOpCode()) {
             case OpCode::Id::EXIT: {
+                ASSERT_MSG(instr.pred.pred_index == static_cast<u64>(Pred::UnusedIndex),
+                           "Predicated exits not implemented");
                 shader.AddLine("return true;");
                 offset = PROGRAM_END - 1;
+                break;
+            }
+            case OpCode::Id::KIL: {
+                shader.AddLine("discard;");
                 break;
             }
             case OpCode::Id::IPA: {
@@ -571,7 +577,7 @@ private:
         }
 
         // Close the predicate condition scope.
-        if (instr.pred != Pred::UnusedIndex) {
+        if (instr.pred.pred_index != static_cast<u64>(Pred::UnusedIndex)) {
             --shader.scope;
             shader.AddLine("}");
         }
