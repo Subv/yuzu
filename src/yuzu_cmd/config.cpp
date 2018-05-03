@@ -91,6 +91,7 @@ void Config::ReadValues() {
 
     // Core
     Settings::values.use_cpu_jit = sdl2_config->GetBoolean("Core", "use_cpu_jit", true);
+    Settings::values.use_multi_core = sdl2_config->GetBoolean("Core", "use_multi_core", true);
 
     // Renderer
     Settings::values.resolution_factor =
