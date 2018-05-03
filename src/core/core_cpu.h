@@ -51,12 +51,12 @@ public:
 
     void PrepareReschedule();
 
-    ARM_Interface& CPU() {
+    ARM_Interface& ArmInterface() {
         return *arm_interface;
     }
 
-    Kernel::Scheduler& Scheduler() {
-        return *scheduler;
+    const std::shared_ptr<Kernel::Scheduler>& Scheduler() const {
+        return scheduler;
     }
 
     bool IsMainCore() const {
@@ -68,7 +68,7 @@ private:
 
     std::shared_ptr<ARM_Interface> arm_interface;
     std::shared_ptr<CpuBarrier> cpu_barrier;
-    std::unique_ptr<Kernel::Scheduler> scheduler;
+    std::shared_ptr<Kernel::Scheduler> scheduler;
 
     bool reschedule_pending{};
     size_t core_index;
