@@ -159,6 +159,8 @@ static u8* GetPointerFromVMA(VAddr vaddr) {
 
 template <typename T>
 T Read(const VAddr vaddr) {
+    std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
+
     const u8* page_pointer = current_page_table->pointers[vaddr >> PAGE_BITS];
     if (page_pointer) {
         // NOTE: Avoid adding any extra logic to this fast-path block
@@ -168,7 +170,7 @@ T Read(const VAddr vaddr) {
     }
 
     // The memory access might do an MMIO or cached access, so we have to lock the HLE kernel state
-    std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
+    // std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
 
     PageType type = current_page_table->attributes[vaddr >> PAGE_BITS];
     switch (type) {
@@ -192,6 +194,8 @@ T Read(const VAddr vaddr) {
 
 template <typename T>
 void Write(const VAddr vaddr, const T data) {
+    std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
+
     u8* page_pointer = current_page_table->pointers[vaddr >> PAGE_BITS];
     if (page_pointer) {
         // NOTE: Avoid adding any extra logic to this fast-path block
@@ -200,7 +204,7 @@ void Write(const VAddr vaddr, const T data) {
     }
 
     // The memory access might do an MMIO or cached access, so we have to lock the HLE kernel state
-    std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
+    // std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
 
     PageType type = current_page_table->attributes[vaddr >> PAGE_BITS];
     switch (type) {
