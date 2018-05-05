@@ -111,7 +111,7 @@ std::unique_ptr<Dynarmic::A64::Jit> MakeJit(const std::unique_ptr<ARM_Dynarmic_C
     config.tpidr_el0 = &cb->tpidr_el0;
     config.dczid_el0 = 4;
     config.ctr_el0 = 0x8444c004;
-    config.page_table = reinterpret_cast<void**>(page_table);
+    config.page_table = nullptr;
     config.page_table_address_space_bits = Memory::ADDRESS_SPACE_BITS;
     config.silently_mirror_page_table = false;
 
@@ -119,7 +119,7 @@ std::unique_ptr<Dynarmic::A64::Jit> MakeJit(const std::unique_ptr<ARM_Dynarmic_C
 }
 
 void ARM_Dynarmic::Run() {
-    ASSERT(Memory::GetCurrentPageTable() == current_page_table);
+    // ASSERT(Memory::GetCurrentPageTable() == current_page_table);
 
     jit->Run();
 }
