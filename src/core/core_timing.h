@@ -149,7 +149,7 @@ void UnregisterAllEvents();
  * is scheduled earlier than the current values.
  * Scheduling from a callback will not update the downcount until the Advance() completes.
  */
-void ScheduleEvent(s64 cycles_into_future, const EventType* event_type, u64 userdata = 0);
+// void ScheduleEvent(s64 cycles_into_future, const EventType* event_type, u64 userdata = 0);
 
 /**
  * This is to be called when outside of hle threads, such as the graphics thread, wants to
@@ -157,7 +157,7 @@ void ScheduleEvent(s64 cycles_into_future, const EventType* event_type, u64 user
  * Not that this doesn't change slice_length and thus events scheduled by this might be called
  * with a delay of up to MAX_SLICE_LENGTH
  */
-void ScheduleEventThreadsafe(s64 cycles_into_future, const EventType* event_type, u64 userdata);
+void ScheduleEvent(s64 cycles_into_future, const EventType* event_type, u64 userdata = 0);
 
 void UnscheduleEvent(const EventType* event_type, u64 userdata);
 

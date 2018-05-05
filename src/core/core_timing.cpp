@@ -133,19 +133,19 @@ void ClearPendingEvents() {
     event_queue.clear();
 }
 
+// void ScheduleEvent(s64 cycles_into_future, const EventType* event_type, u64 userdata) {
+//    ASSERT(event_type != nullptr);
+//    s64 timeout = GetTicks() + cycles_into_future;
+//
+//    // If this event needs to be scheduled before the next advance(), force one early
+//    if (!is_global_timer_sane)
+//        ForceExceptionCheck(cycles_into_future);
+//
+//    event_queue.emplace_back(Event{timeout, event_fifo_id++, userdata, event_type});
+//    std::push_heap(event_queue.begin(), event_queue.end(), std::greater<Event>());
+//}
+
 void ScheduleEvent(s64 cycles_into_future, const EventType* event_type, u64 userdata) {
-    ASSERT(event_type != nullptr);
-    s64 timeout = GetTicks() + cycles_into_future;
-
-    // If this event needs to be scheduled before the next advance(), force one early
-    if (!is_global_timer_sane)
-        ForceExceptionCheck(cycles_into_future);
-
-    event_queue.emplace_back(Event{timeout, event_fifo_id++, userdata, event_type});
-    std::push_heap(event_queue.begin(), event_queue.end(), std::greater<Event>());
-}
-
-void ScheduleEventThreadsafe(s64 cycles_into_future, const EventType* event_type, u64 userdata) {
     ts_queue.Push(Event{global_timer + cycles_into_future, 0, userdata, event_type});
 }
 
