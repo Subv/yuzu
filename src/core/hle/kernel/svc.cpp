@@ -401,8 +401,8 @@ static ResultCode SetThreadPriority(Handle handle, u32 priority) {
 
 /// Get which CPU core is executing the current thread
 static u32 GetCurrentProcessorNumber() {
-    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, defaulting to processor 0");
-    return 0;
+    NGLOG_DEBUG(Kernel_SVC, "called");
+    return GetCurrentThread()->processor_id;
 }
 
 static ResultCode MapSharedMemory(Handle shared_memory_handle, VAddr addr, u64 size,
@@ -718,16 +718,31 @@ static ResultCode CreateTransferMemory(Handle* handle, VAddr addr, u64 size, u32
     return RESULT_SUCCESS;
 }
 
-static ResultCode GetThreadCoreMask(Handle handle, u32* mask, u64* unknown) {
-    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, handle={:010X}", handle);
-    *mask = 0x0;
-    *unknown = 0xf;
+static ResultCode GetThreadCoreMask(Handle thread_handle, u32* core, u64* mask) {
+    NGLOG_DEBUG(Kernel_SVC, "called, handle={:010X}", thread_handle);
+
+    const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
+    if (!thread) {
+        return ERR_INVALID_HANDLE;
+    }
+
+    *core = thread->ideal_core;
+    *mask = thread->mask; // TODO(bunnei): Verify this on hardware
+
     return RESULT_SUCCESS;
 }
 
-static ResultCode SetThreadCoreMask(Handle handle, u32 mask, u64 unknown) {
-    NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, handle={:#010X}, mask={:#010X}, unknown={:#X}",
-                  handle, mask, unknown);
+static ResultCode SetThreadCoreMask(Handle thread_handle, u32 core, u64 mask) {
+    NGLOG_CRITICAL(Kernel_SVC, "called, handle={:#010X}, mask={:#010X}, ideal_core={:#X}",
+                   thread_handle, mask, core);
+
+    const SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
+    if (!thread) {
+        return ERR_INVALID_HANDLE;
+    }
+
+    thread->ChangeCore(core, mask);
+
     return RESULT_SUCCESS;
 }
 
