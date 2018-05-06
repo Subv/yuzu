@@ -1,7 +1,7 @@
 // Copyright 2014 Citra Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
-
+#pragma optimize("", off)
 #include <map>
 #include <vector>
 #include <boost/range/algorithm_ext/erase.hpp>
@@ -69,15 +69,27 @@ ResultCode Mutex::TryAcquire(VAddr address, Handle holding_thread_handle,
     // thread.
     ASSERT(requesting_thread == GetCurrentThread());
 
+    auto monitor = Core::System::GetInstance().monitor;
+    ASSERT(monitor->GetExclusiveState() == 0);
+
+    monitor->SetExclusive(address);
+
     u32 addr_value = Memory::Read32(address);
 
     // If the mutex isn't being held, just return success.
     if (addr_value != (holding_thread_handle | Mutex::MutexHasWaitersFlag)) {
+        Core::System::GetInstance().monitor->ClearExclusive();
         return RESULT_SUCCESS;
     }
 
-    if (holding_thread == nullptr)
+    if (holding_thread == nullptr) {
+        Core::System::GetInstance().monitor->ClearExclusive();
         return ERR_INVALID_HANDLE;
+    }
+
+
+    if (address == 0x1158c46a0 && GetCurrentThread()->thread_id == 10)
+        __debugbreak();
 
     // Wait until the mutex is released
     GetCurrentThread()->mutex_wait_address = address;
@@ -90,6 +102,8 @@ ResultCode Mutex::TryAcquire(VAddr address, Handle holding_thread_handle,
     holding_thread->AddMutexWaiter(GetCurrentThread());
 
     Core::System::GetInstance().PrepareReschedule();
+
+    Core::System::GetInstance().monitor->ClearExclusive();
 
     return RESULT_SUCCESS;
 }
@@ -104,7 +118,7 @@ ResultCode Mutex::Release(VAddr address) {
 
     // There are no more threads waiting for the mutex, release it completely.
     if (thread == nullptr) {
-        ASSERT(GetCurrentThread()->wait_mutex_threads.empty());
+        //ASSERT(GetCurrentThread()->wait_mutex_threads.empty());
         Memory::Write32(address, 0);
         return RESULT_SUCCESS;
     }

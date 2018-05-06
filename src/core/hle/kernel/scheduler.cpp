@@ -4,6 +4,7 @@
 
 #include "core/core.h"
 #include "core/core_timing.h"
+#include "core/arm/arm_interface.h"
 #include "core/hle/kernel/process.h"
 #include "core/hle/kernel/scheduler.h"
 

@@ -1,7 +1,7 @@
 // Copyright 2018 yuzu emulator team
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
-
+#pragma optimize("", off)
 #include <algorithm>
 #include <cinttypes>
 #include <iterator>
@@ -9,6 +9,7 @@
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/string_util.h"
+#include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/kernel/client_port.h"
@@ -611,9 +612,13 @@ static ResultCode WaitProcessWideKeyAtomic(VAddr mutex_addr, VAddr condition_var
     SharedPtr<Thread> thread = g_handle_table.Get<Thread>(thread_handle);
     ASSERT(thread);
 
+    SharedPtr<Thread> current_thread = GetCurrentThread();
+
+    /*if (mutex_addr == 0x1158c46a0 && current_thread->thread_id == 10)
+        __debugbreak();*/
+
     CASCADE_CODE(Mutex::Release(mutex_addr));
 
-    SharedPtr<Thread> current_thread = GetCurrentThread();
     current_thread->condvar_wait_address = condition_variable_addr;
     current_thread->mutex_wait_address = mutex_addr;
     current_thread->wait_handle = thread_handle;
@@ -624,7 +629,7 @@ static ResultCode WaitProcessWideKeyAtomic(VAddr mutex_addr, VAddr condition_var
 
     // Note: Deliberately don't attempt to inherit the lock owner's priority.
 
-    Core::System::GetInstance().PrepareReschedule();
+    Core::System::GetInstance().CPU(current_thread->processor_id).PrepareReschedule();
     return RESULT_SUCCESS;
 }
 
@@ -646,11 +651,17 @@ static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target
                 break;
 
             // If the mutex is not yet acquired, acquire it.
+            auto monitor = Core::System::GetInstance().monitor;
+            ASSERT(monitor->GetExclusiveState() == 0);
+
+            monitor->SetExclusive(thread->mutex_wait_address);
             u32 mutex_val = Memory::Read32(thread->mutex_wait_address);
 
             if (mutex_val == 0) {
                 // We were able to acquire the mutex, resume this thread.
-                Memory::Write32(thread->mutex_wait_address, thread->wait_handle);
+                u8 ex_res =
+                    monitor->ExclusiveWrite32(thread->mutex_wait_address, thread->wait_handle);
+                ASSERT(ex_res == 0);
                 ASSERT(thread->status == THREADSTATUS_WAIT_MUTEX);
                 thread->ResumeFromWait();
 
@@ -664,6 +675,7 @@ static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target
                 thread->wait_handle = 0;
             } else {
                 // Couldn't acquire the mutex, block the thread.
+                ASSERT(Memory::Read32(thread->mutex_wait_address) == mutex_val);
                 Handle owner_handle = static_cast<Handle>(mutex_val & Mutex::MutexOwnerMask);
                 auto owner = g_handle_table.Get<Thread>(owner_handle);
                 ASSERT(owner);
@@ -671,13 +683,20 @@ static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target
                 thread->status = THREADSTATUS_WAIT_MUTEX;
                 thread->wakeup_callback = nullptr;
 
+                /*if (thread->mutex_wait_address == 0x1158c46a0 && thread->thread_id == 10)
+                    __debugbreak();*/
+
                 // Signal that the mutex now has a waiting thread.
-                Memory::Write32(thread->mutex_wait_address, mutex_val | Mutex::MutexHasWaitersFlag);
+                u8 ex_res = monitor->ExclusiveWrite32(thread->mutex_wait_address,
+                                                      mutex_val | Mutex::MutexHasWaitersFlag);
+                ASSERT(ex_res == 0);
 
                 owner->AddMutexWaiter(thread);
 
-                Core::System::GetInstance().PrepareReschedule();
+                Core::System::GetInstance().CPU(thread->processor_id).PrepareReschedule();
             }
+
+            Core::System::GetInstance().monitor->ClearExclusive();
 
             ++processed;
         }

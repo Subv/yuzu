@@ -2,8 +2,10 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#pragma optimize("", off)
 #include <cinttypes>
 #include <memory>
+#include <thread>
 #include <dynarmic/A64/a64.h>
 #include <dynarmic/A64/config.h>
 #include "common/logging/log.h"
@@ -18,7 +20,9 @@ using Vector = Dynarmic::A64::Vector;
 
 class ARM_Dynarmic_Callbacks : public Dynarmic::A64::UserCallbacks {
 public:
-    explicit ARM_Dynarmic_Callbacks(ARM_Dynarmic& parent) : parent(parent) {}
+    explicit ARM_Dynarmic_Callbacks(ARM_Dynarmic& parent,
+                                    std::shared_ptr<ARM_ExclusiveMonitor> monitor)
+        : parent(parent), monitor(std::move(monitor)) {}
     ~ARM_Dynarmic_Callbacks() = default;
 
     u8 MemoryRead8(u64 vaddr) override {
@@ -96,10 +100,43 @@ public:
         return CoreTiming::GetTicks();
     }
 
+    void SetExclusive(u64 addr) override {
+        monitor->SetExclusive(addr);
+    }
+
+    void ClearExclusive() override {
+        monitor->ClearExclusive();
+    }
+
+    u8 GetExclusiveState() override {
+        return monitor->GetExclusiveState();
+    }
+
+    u64 GetExclusiveAddress() override {
+        return monitor->GetExclusiveAddress();
+    }
+
+    u8 ExclusiveWrite8(u64 vaddr, u8 value) override {
+        return monitor->ExclusiveWrite8(vaddr, value);
+    }
+    u8 ExclusiveWrite16(u64 vaddr, u16 value) override {
+        return monitor->ExclusiveWrite16(vaddr, value);
+    }
+    u8 ExclusiveWrite32(u64 vaddr, u32 value) override {
+        return monitor->ExclusiveWrite32(vaddr, value);
+    }
+    u8 ExclusiveWrite64(u64 vaddr, u64 value) override {
+        return monitor->ExclusiveWrite64(vaddr, value);
+    }
+    u8 ExclusiveWrite128(u64 vaddr, Vector value) override {
+        return monitor->ExclusiveWrite128(vaddr, value);
+    }
+
     ARM_Dynarmic& parent;
     size_t num_interpreted_instructions = 0;
     u64 tpidrro_el0 = 0;
     u64 tpidr_el0 = 0;
+    std::shared_ptr<ARM_ExclusiveMonitor> monitor;
 };
 
 std::unique_ptr<Dynarmic::A64::Jit> MakeJit(const std::unique_ptr<ARM_Dynarmic_Callbacks>& cb) {
@@ -128,8 +165,8 @@ void ARM_Dynarmic::Step() {
     cb->InterpreterFallback(jit->GetPC(), 1);
 }
 
-ARM_Dynarmic::ARM_Dynarmic()
-    : cb(std::make_unique<ARM_Dynarmic_Callbacks>(*this)), jit(MakeJit(cb)) {
+ARM_Dynarmic::ARM_Dynarmic(std::shared_ptr<ARM_ExclusiveMonitor> monitor)
+    : cb(std::make_unique<ARM_Dynarmic_Callbacks>(*this, std::move(monitor))), jit(MakeJit(cb)) {
     ARM_Interface::ThreadContext ctx;
     inner_unicorn.SaveContext(ctx);
     LoadContext(ctx);
@@ -229,4 +266,96 @@ void ARM_Dynarmic::ClearInstructionCache() {
 void ARM_Dynarmic::PageTableChanged() {
     jit = MakeJit(cb);
     current_page_table = Memory::GetCurrentPageTable();
+}
+
+void ARM_ExclusiveMonitor::SetExclusive(u64 addr) {
+    std::lock_guard<std::mutex> lock(mutex);
+    ExclusiveState state{};
+    state.exclusive_state = 1;
+    state.exclusive_owner = std::this_thread::get_id();
+    state.exclusive_address = addr;
+    exclusives[std::this_thread::get_id()] = state;
+}
+
+void ARM_ExclusiveMonitor::ClearExclusive() {
+    std::lock_guard<std::mutex> lock(mutex);
+    exclusives[std::this_thread::get_id()].exclusive_state = 0;
+}
+
+void ARM_ExclusiveMonitor::ClearExclusiveAddressEx(u64 addr) {
+    for (auto itr = exclusives.begin(); itr != exclusives.end(); ++itr) {
+        if (itr->second.exclusive_address == addr) {
+            itr->second.exclusive_state = 0;
+        }
+    }
+}
+
+u8 ARM_ExclusiveMonitor::GetExclusiveState() {
+    return exclusives[std::this_thread::get_id()].exclusive_state;
+}
+
+u64 ARM_ExclusiveMonitor::GetExclusiveAddress() {
+    return exclusives[std::this_thread::get_id()].exclusive_address;
+}
+
+u8 ARM_ExclusiveMonitor::ExclusiveWrite8(u64 vaddr, u8 value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (GetExclusiveState() == 0)
+        return 1;
+
+    if (GetExclusiveAddress() != vaddr)
+        return 1;
+
+    Memory::Write8(vaddr, value);
+    ClearExclusiveAddressEx(vaddr);
+    return 0;
+}
+u8 ARM_ExclusiveMonitor::ExclusiveWrite16(u64 vaddr, u16 value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (GetExclusiveState() == 0)
+        return 1;
+
+    if (GetExclusiveAddress() != vaddr)
+        return 1;
+
+    Memory::Write16(vaddr, value);
+    ClearExclusiveAddressEx(vaddr);
+    return 0;
+}
+u8 ARM_ExclusiveMonitor::ExclusiveWrite32(u64 vaddr, u32 value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (GetExclusiveState() == 0)
+        return 1;
+
+    if (GetExclusiveAddress() != vaddr)
+        return 1;
+
+    Memory::Write32(vaddr, value);
+    ClearExclusiveAddressEx(vaddr);
+    return 0;
+}
+u8 ARM_ExclusiveMonitor::ExclusiveWrite64(u64 vaddr, u64 value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (GetExclusiveState() == 0)
+        return 1;
+
+    if (GetExclusiveAddress() != vaddr)
+        return 1;
+
+    Memory::Write64(vaddr, value);
+    ClearExclusiveAddressEx(vaddr);
+    return 0;
+}
+u8 ARM_ExclusiveMonitor::ExclusiveWrite128(u64 vaddr, Vector value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (GetExclusiveState() == 0)
+        return 1;
+
+    if (GetExclusiveAddress() != vaddr)
+        return 1;
+
+    Memory::Write64(vaddr, value[0]);
+    Memory::Write64(vaddr + 8, value[1]);
+    ClearExclusiveAddressEx(vaddr);
+    return 0;
 }

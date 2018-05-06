@@ -114,6 +114,8 @@ public:
 
     ARM_Interface& ArmInterface(size_t core_index);
 
+    Cpu& CPU(size_t core_index);
+
     Tegra::GPU& GPU() {
         return *gpu_core;
     }
@@ -153,6 +155,8 @@ public:
         debug_context = std::move(context);
     }
 
+    std::shared_ptr<ARM_ExclusiveMonitor> monitor;
+
     std::shared_ptr<Tegra::DebugContext> GetGPUDebugContext() const {
         return debug_context;
     }
@@ -180,6 +184,7 @@ private:
     std::shared_ptr<Tegra::DebugContext> debug_context;
     Kernel::SharedPtr<Kernel::Process> current_process;
     std::shared_ptr<CpuBarrier> cpu_barrier;
+
     std::array<std::shared_ptr<Cpu>, NUM_CPU_CORES> cpu_cores;
     std::array<std::unique_ptr<std::thread>, NUM_CPU_CORES - 1> cpu_core_threads;
 

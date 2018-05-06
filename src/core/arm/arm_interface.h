@@ -1,12 +1,44 @@
 // Copyright 2014 Citra Emulator Project
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
-
+#pragma optimize("", off)
 #pragma once
 
 #include <array>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
 #include "common/common_types.h"
 #include "core/hle/kernel/vm_manager.h"
+
+class ARM_ExclusiveMonitor {
+public:
+    struct ExclusiveState {
+        u8 exclusive_state = 0;
+        u64 exclusive_address = 0;
+        std::thread::id exclusive_owner;
+    };
+
+    std::unordered_map<std::thread::id, ExclusiveState> exclusives;
+    std::mutex mutex;
+
+    void SetExclusive(u64 addr);
+    void ClearExclusive();
+
+    u8 GetExclusiveState();
+
+    u64 GetExclusiveAddress();
+
+    u8 ExclusiveWrite8(u64 vaddr, u8 value);
+    u8 ExclusiveWrite16(u64 vaddr, u16 value);
+    u8 ExclusiveWrite32(u64 vaddr, u32 value);
+    u8 ExclusiveWrite64(u64 vaddr, u64 value);
+    u8 ExclusiveWrite128(u64 vaddr, std::array<std::uint64_t, 2> value);
+
+private:
+    void ClearExclusiveAddressEx(u64 addr);
+};
 
 /// Generic ARM11 CPU interface
 class ARM_Interface : NonCopyable {

@@ -48,12 +48,13 @@ bool CpuBarrier::Rendezvous() {
     return false;
 }
 
-Cpu::Cpu(std::shared_ptr<CpuBarrier> cpu_barrier, size_t core_index)
-    : cpu_barrier{std::move(cpu_barrier)}, core_index{core_index} {
+Cpu::Cpu(std::shared_ptr<CpuBarrier> cpu_barrier, size_t core_index,
+         std::shared_ptr<ARM_ExclusiveMonitor> monitor)
+    : cpu_barrier{std::move(cpu_barrier)}, core_index{core_index}, monitor(std::move(monitor)) {
 
     if (Settings::values.use_cpu_jit) {
 #ifdef ARCHITECTURE_x86_64
-        arm_interface = std::make_shared<ARM_Dynarmic>();
+        arm_interface = std::make_shared<ARM_Dynarmic>(this->monitor);
 #else
         cpu_core = std::make_shared<ARM_Unicorn>();
         NGLOG_WARNING(Core, "CPU JIT requested, but Dynarmic not available");

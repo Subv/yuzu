@@ -12,6 +12,7 @@
 #include "common/common_types.h"
 
 class ARM_Interface;
+class ARM_ExclusiveMonitor;
 
 namespace Kernel {
 class Scheduler;
@@ -40,7 +41,8 @@ private:
 
 class Cpu {
 public:
-    Cpu(std::shared_ptr<CpuBarrier> cpu_barrier, size_t core_index);
+    Cpu(std::shared_ptr<CpuBarrier> cpu_barrier, size_t core_index,
+        std::shared_ptr<ARM_ExclusiveMonitor> monitor);
 
     void RunLoop(bool tight_loop = true);
 
@@ -69,6 +71,7 @@ private:
 
     bool reschedule_pending{};
     size_t core_index;
+    std::shared_ptr<ARM_ExclusiveMonitor> monitor;
 };
 
 } // namespace Core

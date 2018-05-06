@@ -14,7 +14,7 @@ class ARM_Dynarmic_Callbacks;
 
 class ARM_Dynarmic final : public ARM_Interface {
 public:
-    ARM_Dynarmic();
+    ARM_Dynarmic(std::shared_ptr<ARM_ExclusiveMonitor> monitor);
     ~ARM_Dynarmic();
 
     void MapBackingMemory(VAddr address, size_t size, u8* memory,
@@ -43,7 +43,7 @@ public:
     void ClearInstructionCache() override;
     void PageTableChanged() override;
 
-private:
+//private:
     friend class ARM_Dynarmic_Callbacks;
     std::unique_ptr<ARM_Dynarmic_Callbacks> cb;
     std::unique_ptr<Dynarmic::A64::Jit> jit;

@@ -145,6 +145,11 @@ ARM_Interface& System::ArmInterface(size_t core_index) {
     return cpu_cores[core_index]->ArmInterface();
 }
 
+Cpu& System::CPU(size_t core_index) {
+    ASSERT(core_index < NUM_CPU_CORES);
+    return *cpu_cores[core_index];
+}
+
 System::ResultStatus System::Init(EmuWindow* emu_window, u32 system_mode) {
     NGLOG_DEBUG(HW_Memory, "initialized OK");
 
@@ -153,8 +158,9 @@ System::ResultStatus System::Init(EmuWindow* emu_window, u32 system_mode) {
     current_process = Kernel::Process::Create("main");
 
     cpu_barrier = std::make_shared<CpuBarrier>();
+    monitor = std::make_shared<ARM_ExclusiveMonitor>();
     for (size_t index = 0; index < cpu_cores.size(); ++index) {
-        cpu_cores[index] = std::make_shared<Cpu>(cpu_barrier, index);
+        cpu_cores[index] = std::make_shared<Cpu>(cpu_barrier, index, monitor);
     }
 
     gpu_core = std::make_unique<Tegra::GPU>();
