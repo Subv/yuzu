@@ -1,7 +1,7 @@
 // Copyright 2018 yuzu emulator team
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
-
+#pragma optimize("", off)
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/arm/arm_interface.h"
@@ -9,6 +9,8 @@
 #include "core/hle/kernel/scheduler.h"
 
 namespace Kernel {
+
+std::mutex Scheduler::scheduler_mutex;
 
 Scheduler::Scheduler(ARM_Interface* cpu_core) : cpu_core(cpu_core) {}
 
@@ -19,6 +21,7 @@ Scheduler::~Scheduler() {
 }
 
 bool Scheduler::HaveReadyThreads() {
+    std::lock_guard<std::mutex> lock(scheduler_mutex);
     return ready_queue.get_first() != nullptr;
 }
 
@@ -48,6 +51,13 @@ Thread* Scheduler::PopNextReadyThread() {
 void Scheduler::SwitchContext(Thread* new_thread) {
     Thread* previous_thread = GetCurrentThread();
 
+    u32 previous_status = -1;
+    u32 new_status = -1;
+
+    if (previous_thread)
+        previous_status = previous_thread->status;
+    if (new_thread)
+        new_status = new_thread->status;
     // Save context for previous thread
     if (previous_thread) {
         previous_thread->last_running_ticks = CoreTiming::GetTicks();
@@ -91,6 +101,7 @@ void Scheduler::SwitchContext(Thread* new_thread) {
 }
 
 void Scheduler::Reschedule() {
+    std::lock_guard<std::mutex> lock(scheduler_mutex);
     Thread* cur = GetCurrentThread();
     Thread* next = PopNextReadyThread();
 
@@ -106,16 +117,19 @@ void Scheduler::Reschedule() {
 }
 
 void Scheduler::AddThread(SharedPtr<Thread> thread, u32 priority) {
+    std::lock_guard<std::mutex> lock(scheduler_mutex);
     thread_list.push_back(thread);
     ready_queue.prepare(priority);
 }
 
 void Scheduler::RemoveThread(Thread* thread) {
+    std::lock_guard<std::mutex> lock(scheduler_mutex);
     thread_list.erase(std::remove(thread_list.begin(), thread_list.end(), thread),
                       thread_list.end());
 }
 
 void Scheduler::ScheduleThread(Thread* thread, u32 priority) {
+    std::lock_guard<std::mutex> lock(scheduler_mutex);
     ASSERT(thread->status == THREADSTATUS_READY);
     ready_queue.push_back(priority, thread);
 }
@@ -126,6 +140,7 @@ void Scheduler::UnscheduleThread(Thread* thread, u32 priority) {
 }
 
 void Scheduler::SetThreadPriority(Thread* thread, u32 priority) {
+    std::lock_guard<std::mutex> lock(scheduler_mutex);
     // If thread was ready, adjust queues
     if (thread->status == THREADSTATUS_READY)
         ready_queue.move(thread, thread->current_priority, priority);

@@ -64,10 +64,11 @@ ResultCode Mutex::TryAcquire(VAddr address, Handle holding_thread_handle,
 
     SharedPtr<Thread> holding_thread = g_handle_table.Get<Thread>(holding_thread_handle);
     SharedPtr<Thread> requesting_thread = g_handle_table.Get<Thread>(requesting_thread_handle);
+    auto current_thread = GetCurrentThread();
 
     // TODO(Subv): It is currently unknown if it is possible to lock a mutex in behalf of another
     // thread.
-    ASSERT(requesting_thread == GetCurrentThread());
+    ASSERT(requesting_thread == current_thread);
 
     auto monitor = Core::System::GetInstance().monitor;
     ASSERT(monitor->GetExclusiveState() == 0);
@@ -87,21 +88,20 @@ ResultCode Mutex::TryAcquire(VAddr address, Handle holding_thread_handle,
         return ERR_INVALID_HANDLE;
     }
 
-
-    if (address == 0x1158c46a0 && GetCurrentThread()->thread_id == 10)
+    if (address == 0x1158c46a0 && current_thread->thread_id == 10)
         __debugbreak();
 
     // Wait until the mutex is released
-    GetCurrentThread()->mutex_wait_address = address;
-    GetCurrentThread()->wait_handle = requesting_thread_handle;
+    current_thread->mutex_wait_address = address;
+    current_thread->wait_handle = requesting_thread_handle;
 
-    GetCurrentThread()->status = THREADSTATUS_WAIT_MUTEX;
-    GetCurrentThread()->wakeup_callback = nullptr;
+    current_thread->status = THREADSTATUS_WAIT_MUTEX;
+    current_thread->wakeup_callback = nullptr;
 
     // Update the lock holder thread's priority to prevent priority inversion.
-    holding_thread->AddMutexWaiter(GetCurrentThread());
+    holding_thread->AddMutexWaiter(current_thread);
 
-    Core::System::GetInstance().PrepareReschedule();
+    Core::System::GetInstance().CPU(current_thread->processor_id).PrepareReschedule();
 
     Core::System::GetInstance().monitor->ClearExclusive();
 
@@ -118,9 +118,17 @@ ResultCode Mutex::Release(VAddr address) {
 
     // There are no more threads waiting for the mutex, release it completely.
     if (thread == nullptr) {
-        //ASSERT(GetCurrentThread()->wait_mutex_threads.empty());
+        // ASSERT(GetCurrentThread()->wait_mutex_threads.empty());
         Memory::Write32(address, 0);
         return RESULT_SUCCESS;
+    }
+
+    if (address == 0x1158c46a0 && thread->thread_id == 10) {
+        NGLOG_CRITICAL(
+            HW_GPU,
+            "Thread 10 now owns mutex cv 0x{:X} prev owner 0x{:X} waiters 0x{:X} waithandle 0x{:X}",
+            thread->condvar_wait_address, GetCurrentThread()->thread_id, num_waiters,
+            thread->wait_handle);
     }
 
     // Transfer the ownership of the mutex from the previous owner to the new one.

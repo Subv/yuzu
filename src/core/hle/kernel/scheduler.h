@@ -5,6 +5,7 @@
 #pragma once
 
 #include <vector>
+#include <mutex>
 #include "common/common_types.h"
 #include "common/thread_queue_list.h"
 #include "core/hle/kernel/thread.h"
@@ -46,6 +47,7 @@ public:
         return thread_list;
     }
 
+    static std::mutex scheduler_mutex;
 private:
     /**
      * Pops and returns the next thread from the thread queue

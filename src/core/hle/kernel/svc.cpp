@@ -358,6 +358,12 @@ static ResultCode GetInfo(u64* result, u64 info_id, u64 handle, u64 info_sub_id)
 static ResultCode SetThreadActivity(Handle handle, u32 unknown) {
     NGLOG_WARNING(Kernel_SVC, "(STUBBED) called, handle={:#010X}, unknown={:#010X}", handle,
                   unknown);
+    SharedPtr<Thread> thread = g_handle_table.Get<Thread>(handle);
+    if (!thread)
+        return ERR_INVALID_HANDLE;
+
+    if (thread->thread_id == 13 || thread->thread_id == 20)
+        __debugbreak();
     return RESULT_SUCCESS;
 }
 
@@ -614,11 +620,19 @@ static ResultCode WaitProcessWideKeyAtomic(VAddr mutex_addr, VAddr condition_var
 
     SharedPtr<Thread> current_thread = GetCurrentThread();
 
-    /*if (mutex_addr == 0x1158c46a0 && current_thread->thread_id == 10)
-        __debugbreak();*/
+    if (mutex_addr == 0x1158c46a0 && thread->thread_id == 10) {
+        NGLOG_CRITICAL(HW_GPU, "Thread 10 is preparing to wait on mutex cv 0x{:X} owner 0x{:X}",
+                       condition_variable_addr, Memory::Read32(mutex_addr));
+    }
 
     CASCADE_CODE(Mutex::Release(mutex_addr));
 
+    if (mutex_addr == 0x1158c46a0 && thread->thread_id == 10) {
+        NGLOG_CRITICAL(HW_GPU, "Thread 10 released mutex cv 0x{:X} owner 0x{:X}",
+                       condition_variable_addr, Memory::Read32(mutex_addr));
+    }
+
+    ASSERT(current_thread->status == THREADSTATUS_RUNNING);
     current_thread->condvar_wait_address = condition_variable_addr;
     current_thread->mutex_wait_address = mutex_addr;
     current_thread->wait_handle = thread_handle;
@@ -629,6 +643,10 @@ static ResultCode WaitProcessWideKeyAtomic(VAddr mutex_addr, VAddr condition_var
 
     // Note: Deliberately don't attempt to inherit the lock owner's priority.
 
+    if (current_thread->thread_id == 0xc) {
+        NGLOG_CRITICAL(HW_GPU, "Thread 12 waits on mutex cv 0x{:X} owner 0x{:X}",
+                       condition_variable_addr, Memory::Read32(mutex_addr));
+    }
     Core::System::GetInstance().CPU(current_thread->processor_id).PrepareReschedule();
     return RESULT_SUCCESS;
 }
@@ -669,6 +687,14 @@ static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target
                 if (lock_owner)
                     lock_owner->RemoveMutexWaiter(thread);
 
+                if (thread->mutex_wait_address == 0x1158c46a0 && thread->thread_id == 10) {
+                    NGLOG_CRITICAL(HW_GPU,
+                                   "Thread 10 now owns signaled cv mutex cv 0x{:X} waithandle "
+                                   "0x{:X} mutex value 0x{:X}",
+                                   thread->condvar_wait_address, GetCurrentThread()->thread_id,
+                                   thread->wait_handle, Memory::Read32(thread->mutex_wait_address));
+                }
+
                 thread->lock_owner = nullptr;
                 thread->mutex_wait_address = 0;
                 thread->condvar_wait_address = 0;
@@ -679,12 +705,15 @@ static ResultCode SignalProcessWideKey(VAddr condition_variable_addr, s32 target
                 Handle owner_handle = static_cast<Handle>(mutex_val & Mutex::MutexOwnerMask);
                 auto owner = g_handle_table.Get<Thread>(owner_handle);
                 ASSERT(owner);
-                ASSERT(thread->status != THREADSTATUS_RUNNING);
-                thread->status = THREADSTATUS_WAIT_MUTEX;
+                ASSERT(owner != thread);
+                ASSERT(thread->status == THREADSTATUS_WAIT_MUTEX);
+                //thread->scheduler->UnscheduleThread(thread.get(), thread->current_priority);
                 thread->wakeup_callback = nullptr;
 
-                /*if (thread->mutex_wait_address == 0x1158c46a0 && thread->thread_id == 10)
-                    __debugbreak();*/
+                if (thread->mutex_wait_address == 0x1158c46a0 && thread->thread_id == 10) {
+                    NGLOG_CRITICAL(HW_GPU, "Thread 10 is waiting on mutex cv 0x{:X} owner 0x{:X}",
+                                   condition_variable_addr, owner->thread_id);
+                }
 
                 // Signal that the mutex now has a waiting thread.
                 u8 ex_res = monitor->ExclusiveWrite32(thread->mutex_wait_address,
@@ -766,6 +795,14 @@ static ResultCode SetThreadCoreMask(Handle thread_handle, u32 core, u64 mask) {
     if (!thread) {
         return ERR_INVALID_HANDLE;
     }
+
+    ASSERT(core != -2);
+    ASSERT(mask != 0);
+
+    if (core > 3) {
+        ASSERT((core | 2) == -1);
+    }
+    ASSERT(core != -3);
 
     thread->ChangeCore(core, mask);
 
