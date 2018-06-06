@@ -51,3 +51,6 @@ create_target_directory_groups(video_core)
 
 target_link_libraries(video_core PUBLIC common core)
 target_link_libraries(video_core PRIVATE glad)
+target_link_libraries(video_core
+  -fsanitize=address
+)

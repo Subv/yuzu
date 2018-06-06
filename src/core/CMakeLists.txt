@@ -279,6 +279,9 @@ create_target_directory_groups(core)
 
 target_link_libraries(core PUBLIC common PRIVATE video_core)
 target_link_libraries(core PUBLIC Boost::boost PRIVATE fmt lz4_static unicorn)
+target_link_libraries(core
+  -fsanitize=address
+)
 
 if (ARCHITECTURE_x86_64)
     target_sources(core PRIVATE
