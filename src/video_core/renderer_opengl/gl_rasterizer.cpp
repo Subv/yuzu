@@ -290,14 +290,8 @@ bool RasterizerOpenGL::AccelerateDrawBatch(bool is_indexed) {
     return true;
 }
 
-std::pair<Surface, Surface> RasterizerOpenGL::ConfigureFramebuffers(bool using_color_fb,
-                                                                    bool using_depth_fb) {
+std::pair<Surface, Surface> RasterizerOpenGL::ConfigureFramebuffers() {
     const auto& regs = Core::System::GetInstance().GPU().Maxwell3D().regs;
-
-    if (regs.rt[0].format == Tegra::RenderTargetFormat::NONE) {
-        LOG_ERROR(HW_GPU, "RenderTargetFormat is not configured");
-        using_color_fb = false;
-    }
 
     // TODO(bunnei): Implement this
     const bool has_stencil = false;
@@ -310,41 +304,50 @@ std::pair<Surface, Surface> RasterizerOpenGL::ConfigureFramebuffers(bool using_c
         (state.depth.test_enabled && state.depth.write_mask == GL_TRUE) ||
         (has_stencil && state.stencil.test_enabled && state.stencil.write_mask != 0);
 
-    Surface color_surface;
-    Surface depth_surface;
-    MathUtil::Rectangle<u32> surfaces_rect;
-    std::tie(color_surface, depth_surface, surfaces_rect) =
-        res_cache.GetFramebufferSurfaces(using_color_fb, using_depth_fb);
+    Surface depth_surface = res_cache.GetDepthBufferSurface();
 
-    const MathUtil::Rectangle<s32> viewport_rect{regs.viewport_transform[0].GetRect()};
-    const MathUtil::Rectangle<u32> draw_rect{
-        static_cast<u32>(std::clamp<s32>(static_cast<s32>(surfaces_rect.left) + viewport_rect.left,
-                                         surfaces_rect.left, surfaces_rect.right)), // Left
-        static_cast<u32>(std::clamp<s32>(static_cast<s32>(surfaces_rect.bottom) + viewport_rect.top,
-                                         surfaces_rect.bottom, surfaces_rect.top)), // Top
-        static_cast<u32>(std::clamp<s32>(static_cast<s32>(surfaces_rect.left) + viewport_rect.right,
-                                         surfaces_rect.left, surfaces_rect.right)), // Right
-        static_cast<u32>(
-            std::clamp<s32>(static_cast<s32>(surfaces_rect.bottom) + viewport_rect.bottom,
-                            surfaces_rect.bottom, surfaces_rect.top))}; // Bottom
+    MathUtil::Rectangle<u32> surfaces_rect;
 
     // Bind the framebuffer surfaces
-    BindFramebufferSurfaces(color_surface, depth_surface, has_stencil);
+    state.draw.draw_framebuffer = framebuffer.handle;
+    state.Apply();
+
+    for (u32 index = 0; index < Tegra::Engines::Maxwell3D::Regs::NumRenderTargets; ++index) {
+        Surface color_surface = res_cache.GetColorBufferSurface(index);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D,
+                               color_surface != nullptr ? color_surface->Texture().handle : 0, 0);
+    }
+
+    // TODO(Subv): Support RT remapping via the RT_CONTROL register.
+    const GLenum buffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2,
+                              GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4, GL_COLOR_ATTACHMENT5,
+                              GL_COLOR_ATTACHMENT6, GL_COLOR_ATTACHMENT7, GL_COLOR_ATTACHMENT8};
+    glDrawBuffers(regs.rt_control.count, buffers);
+
+    if (depth_surface != nullptr) {
+        if (has_stencil) {
+            // attach both depth and stencil
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D,
+                                   depth_surface->Texture().handle, 0);
+        } else {
+            // attach depth
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                                   depth_surface->Texture().handle, 0);
+            // clear stencil attachment
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+        }
+    } else {
+        // clear both depth and stencil attachment
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0,
+                               0);
+    }
 
     SyncViewport(surfaces_rect);
 
-    // Viewport can have negative offsets or larger dimensions than our framebuffer sub-rect. Enable
-    // scissor test to prevent drawing outside of the framebuffer region
-    state.scissor.enabled = true;
-    state.scissor.x = draw_rect.left;
-    state.scissor.y = draw_rect.bottom;
-    state.scissor.width = draw_rect.GetWidth();
-    state.scissor.height = draw_rect.GetHeight();
     state.Apply();
 
     // Only return the surface to be marked as dirty if writing to it is enabled.
-    return std::make_pair(write_color_fb ? color_surface : nullptr,
-                          write_depth_fb ? depth_surface : nullptr);
+    return std::make_pair(nullptr, nullptr);
 }
 
 void RasterizerOpenGL::Clear() {
@@ -353,9 +356,12 @@ void RasterizerOpenGL::Clear() {
     bool use_color_fb = false;
     bool use_depth_fb = false;
 
+    if (regs.clear_buffers.RT != 0)
+        __debugbreak();
+
     GLbitfield clear_mask = 0;
     if (regs.clear_buffers.R && regs.clear_buffers.G && regs.clear_buffers.B &&
-        regs.clear_buffers.A) {
+        regs.clear_buffers.A && regs.clear_buffers.RT == 0) {
         clear_mask |= GL_COLOR_BUFFER_BIT;
         use_color_fb = true;
     }
@@ -387,14 +393,14 @@ void RasterizerOpenGL::Clear() {
     glClear(clear_mask);
 
     // Mark framebuffer surfaces as dirty
-    if (Settings::values.use_accurate_framebuffers) {
+    /*if (Settings::values.use_accurate_framebuffers) {
         if (dirty_color_surface != nullptr) {
             res_cache.FlushSurface(dirty_color_surface);
         }
         if (dirty_depth_surface != nullptr) {
             res_cache.FlushSurface(dirty_depth_surface);
         }
-    }
+    }*/
 }
 
 std::pair<u8*, GLintptr> RasterizerOpenGL::AlignBuffer(u8* buffer_ptr, GLintptr buffer_offset,
@@ -511,14 +517,14 @@ void RasterizerOpenGL::DrawArrays() {
     state.Apply();
 
     // Mark framebuffer surfaces as dirty
-    if (Settings::values.use_accurate_framebuffers) {
+    /*if (Settings::values.use_accurate_framebuffers) {
         if (dirty_color_surface != nullptr) {
             res_cache.FlushSurface(dirty_color_surface);
         }
         if (dirty_depth_surface != nullptr) {
             res_cache.FlushSurface(dirty_depth_surface);
         }
-    }
+    }*/
 }
 
 void RasterizerOpenGL::NotifyMaxwellRegisterChanged(u32 method) {}
@@ -702,6 +708,7 @@ u32 RasterizerOpenGL::SetupTextures(Maxwell::ShaderStage stage, GLuint program, 
         // Bind the uniform to the sampler.
         GLint uniform = glGetUniformLocation(program, entry.GetName().c_str());
         if (uniform == -1) {
+            //__debugbreak();
             continue;
         }
 
@@ -710,6 +717,7 @@ u32 RasterizerOpenGL::SetupTextures(Maxwell::ShaderStage stage, GLuint program, 
         const auto texture = maxwell3d.GetStageTexture(entry.GetStage(), entry.GetOffset());
 
         if (!texture.enabled) {
+            __debugbreak();
             state.texture_units[current_bindpoint].texture_2d = 0;
             continue;
         }
@@ -727,6 +735,7 @@ u32 RasterizerOpenGL::SetupTextures(Maxwell::ShaderStage stage, GLuint program, 
             state.texture_units[current_bindpoint].swizzle.a =
                 MaxwellToGL::SwizzleSource(texture.tic.w_source);
         } else {
+            __debugbreak();
             // Can occur when texture addr is null or its memory is unmapped/invalid
             state.texture_units[current_bindpoint].texture_2d = 0;
         }
@@ -767,8 +776,8 @@ void RasterizerOpenGL::SyncViewport(const MathUtil::Rectangle<u32>& surfaces_rec
     const auto& regs = Core::System::GetInstance().GPU().Maxwell3D().regs;
     const MathUtil::Rectangle<s32> viewport_rect{regs.viewport_transform[0].GetRect()};
 
-    state.viewport.x = static_cast<GLint>(surfaces_rect.left) + viewport_rect.left;
-    state.viewport.y = static_cast<GLint>(surfaces_rect.bottom) + viewport_rect.bottom;
+    state.viewport.x = viewport_rect.left;
+    state.viewport.y = viewport_rect.bottom;
     state.viewport.width = static_cast<GLsizei>(viewport_rect.GetWidth());
     state.viewport.height = static_cast<GLsizei>(viewport_rect.GetHeight());
 }

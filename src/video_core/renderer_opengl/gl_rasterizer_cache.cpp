@@ -739,6 +739,38 @@ SurfaceSurfaceRect_Tuple RasterizerCacheOpenGL::GetFramebufferSurfaces(bool usin
     return std::make_tuple(color_surface, depth_surface, fb_rect);
 }
 
+Surface RasterizerCacheOpenGL::GetDepthBufferSurface() {
+    const auto& regs = Core::System::GetInstance().GPU().Maxwell3D().regs;
+
+    if (regs.zeta.Address() == 0)
+        return nullptr;
+
+    SurfaceParams depth_params = SurfaceParams::CreateForDepthBuffer(
+        regs.zeta_width, regs.zeta_height, regs.zeta.Address(), regs.zeta.format);
+
+    Surface depth_surface = GetSurface(depth_params);
+
+    return depth_surface;
+}
+
+Surface RasterizerCacheOpenGL::GetColorBufferSurface(u32 index) {
+    const auto& regs = Core::System::GetInstance().GPU().Maxwell3D().regs;
+
+    ASSERT(index < Tegra::Engines::Maxwell3D::Regs::NumRenderTargets);
+
+    if (index >= regs.rt_control.count)
+        return nullptr;
+
+    if (regs.rt[index].Address() == 0 || regs.rt[index].format == Tegra::RenderTargetFormat::NONE)
+        return nullptr;
+
+    SurfaceParams color_params = SurfaceParams::CreateForFramebuffer(regs.rt[index]);
+
+    Surface color_surface = GetSurface(color_params);
+
+    return color_surface;
+}
+
 void RasterizerCacheOpenGL::LoadSurface(const Surface& surface) {
     surface->LoadGLBuffer();
     surface->UploadGLTexture(read_framebuffer.handle, draw_framebuffer.handle);

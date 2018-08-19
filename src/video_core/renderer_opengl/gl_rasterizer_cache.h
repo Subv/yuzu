@@ -19,6 +19,7 @@
 class CachedSurface;
 using Surface = std::shared_ptr<CachedSurface>;
 using SurfaceSurfaceRect_Tuple = std::tuple<Surface, Surface, MathUtil::Rectangle<u32>>;
+using SurfaceRect_Tuple = std::tuple<Surface, MathUtil::Rectangle<u32>>;
 using PageMap = boost::icl::interval_map<u64, int>;
 
 struct SurfaceParams {
@@ -715,6 +716,9 @@ public:
 
     /// Get the color and depth surfaces based on the framebuffer configuration
     SurfaceSurfaceRect_Tuple GetFramebufferSurfaces(bool using_color_fb, bool using_depth_fb);
+
+    Surface GetDepthBufferSurface();
+    Surface GetColorBufferSurface(u32 index);
 
     /// Flushes the surface to Switch memory
     void FlushSurface(const Surface& surface);
