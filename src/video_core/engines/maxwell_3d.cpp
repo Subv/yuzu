@@ -407,5 +407,13 @@ void Maxwell3D::ProcessClearBuffers() {
     rasterizer.Clear();
 }
 
+std::string Maxwell3D::CreateGlobalMemoryRegion(std::tuple<u64, u64, u64> iadd_data) {
+    state.global_memory_uniforms.emplace(std::get<1>(iadd_data), std::get<2>(iadd_data));
+    return fmt::format("global_memory_region_{}", state.global_memory_uniforms.size() - 1);
+}
+std::set<std::pair<u64, u64>>& Maxwell3D::ListGlobalMemoryRegions() {
+    return state.global_memory_uniforms;
+}
+
 } // namespace Engines
 } // namespace Tegra

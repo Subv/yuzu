@@ -588,7 +588,7 @@ void CachedSurface::LoadGLBuffer() {
         default:
             LOG_CRITICAL(HW_GPU, "Unimplemented tiled load for target={}",
                          static_cast<u32>(params.target));
-            UNREACHABLE();
+            //UNREACHABLE();
         }
 
         gl_buffer.resize(static_cast<size_t>(params.depth) * copy_size);

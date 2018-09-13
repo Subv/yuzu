@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#pragma optimize("", off)
 #include <map>
 #include <set>
 #include <string>
@@ -11,6 +12,7 @@
 
 #include "common/assert.h"
 #include "common/common_types.h"
+#include "core/core.h"
 #include "video_core/engines/shader_bytecode.h"
 #include "video_core/renderer_opengl/gl_rasterizer.h"
 #include "video_core/renderer_opengl/gl_shader_decompiler.h"
@@ -438,6 +440,18 @@ public:
             declarations.AddLine('{');
             declarations.AddLine("    vec4 c" + std::to_string(entry.GetIndex()) +
                                  "[MAX_CONSTBUFFER_ELEMENTS];");
+            declarations.AddLine("};");
+            declarations.AddNewLine();
+        }
+        declarations.AddNewLine();
+
+        const auto& regions{
+            Core::System::GetInstance().GPU().Maxwell3D().ListGlobalMemoryRegions()};
+        for (size_t i = 0; i < regions.size(); ++i) {
+            declarations.AddLine("layout(std140) uniform " +
+                                 fmt::format("global_memory_region_declblock_{}", i));
+            declarations.AddLine('{');
+            declarations.AddLine("    vec4 global_memory_region_" + std::to_string(i) + "[0x400];");
             declarations.AddLine("};");
             declarations.AddNewLine();
         }
@@ -954,7 +968,7 @@ private:
         // TEXS has two destination registers and a swizzle. The first two elements in the swizzle
         // go into gpr0+0 and gpr0+1, and the rest goes into gpr28+0 and gpr28+1
 
-        ASSERT_MSG(instr.texs.nodep == 0, "TEXS nodep not implemented");
+        // ASSERT_MSG(instr.texs.nodep == 0, "TEXS nodep not implemented");
 
         size_t written_components = 0;
         for (u32 component = 0; component < 4; ++component) {
@@ -1111,14 +1125,14 @@ private:
             case OpCode::Id::FMUL_R:
             case OpCode::Id::FMUL_IMM: {
                 // FMUL does not have 'abs' bits and only the second operand has a 'neg' bit.
-                ASSERT_MSG(instr.fmul.tab5cb8_2 == 0, "FMUL tab5cb8_2({}) is not implemented",
+                /*ASSERT_MSG(instr.fmul.tab5cb8_2 == 0, "FMUL tab5cb8_2({}) is not implemented",
                            instr.fmul.tab5cb8_2.Value());
                 ASSERT_MSG(instr.fmul.tab5c68_1 == 0, "FMUL tab5cb8_1({}) is not implemented",
                            instr.fmul.tab5c68_1.Value());
                 ASSERT_MSG(instr.fmul.tab5c68_0 == 1, "FMUL tab5cb8_0({}) is not implemented",
                            instr.fmul.tab5c68_0
                                .Value()); // SMO typical sends 1 here which seems to be the default
-                ASSERT_MSG(instr.fmul.cc == 0, "FMUL cc is not implemented");
+                ASSERT_MSG(instr.fmul.cc == 0, "FMUL cc is not implemented");*/
 
                 op_b = GetOperandAbsNeg(op_b, false, instr.fmul.negate_b);
                 regs.SetRegisterToFloat(instr.gpr0, 0, op_a + " * " + op_b, 1, 1,
@@ -1352,6 +1366,11 @@ private:
                 } else {
                     op_b += regs.GetUniform(instr.cbuf34.index, instr.cbuf34.offset,
                                             GLSLRegister::Type::Integer);
+                    if (opcode->GetId() == OpCode::Id::IADD_C) {
+                        s_last_iadd = last_iadd;
+                        last_iadd = std::make_tuple<Register, u64, u64>(
+                            instr.gpr8.Value(), instr.cbuf34.index, instr.cbuf34.offset);
+                    }
                 }
             }
 
@@ -2060,6 +2079,55 @@ private:
                 shader.AddLine('}');
                 break;
             }
+            case OpCode::Id::LDG: {
+                // Determine number of GPRs to fill with data
+                u64 count = 1;
+
+                switch (instr.ld_g.type) {
+                case Tegra::Shader::UniformType::Single:
+                    count = 1;
+                    break;
+                case Tegra::Shader::UniformType::Double:
+                    count = 2;
+                    break;
+                case Tegra::Shader::UniformType::Quad:
+                case Tegra::Shader::UniformType::UnsignedQuad:
+                    count = 4;
+                    break;
+                default:
+                    LOG_CRITICAL(HW_GPU, "Unimplemented LDG size");
+                    UNREACHABLE();
+                }
+
+                auto [gpr_index, index, offset] = last_iadd;
+                if (gpr_index == 0xFF)
+                    std::tie(gpr_index, index, offset) = s_last_iadd;
+                const auto gpr = regs.GetRegisterAsInteger(gpr_index);
+                const auto constbuffer =
+                    regs.GetUniform(index, offset, GLSLRegister::Type::UnsignedInteger);
+                const auto memory =
+                    Core::System::GetInstance().GPU().Maxwell3D().CreateGlobalMemoryRegion(
+                        {0, index, offset * 4});
+                const auto immediate = std::to_string(instr.ld_g.offset_immediate.Value());
+                const auto o_register =
+                    regs.GetRegisterAsInteger(instr.ld_g.offset_register, 0, false);
+                const auto address = "( " + immediate + " + " + o_register + " )";
+                const auto base_sub = address + " - " + constbuffer;
+                // New scope to prevent potential conflicts
+                shader.AddLine("{");
+                ++shader.scope;
+                shader.AddLine("uint final_offset = " + base_sub + ";");
+                for (size_t out = 0; out < count; ++out) {
+                    const u64 reg_id = instr.ld_g.output.Value() + out;
+                    const auto this_memory =
+                        fmt::format("{}[(final_offset + {}) / 16][((final_offset + {}) / 4) % 4]",
+                                    memory, out * 4, out * 4);
+                    regs.SetRegisterToFloat(reg_id, 0, this_memory, 1, 1);
+                }
+                --shader.scope;
+                shader.AddLine("}");
+                break;
+            }
             default: {
                 LOG_CRITICAL(HW_GPU, "Unhandled memory instruction: {}", opcode->GetName());
                 UNREACHABLE();
@@ -2600,6 +2668,9 @@ private:
     ShaderWriter shader;
     ShaderWriter declarations;
     GLSLRegisterManager regs{shader, declarations, stage, suffix};
+
+    std::tuple<Register, u64, u64> last_iadd{};
+    std::tuple<Register, u64, u64> s_last_iadd{};
 
     // Declarations
     std::set<std::string> declr_predicates;
